@@ -1,0 +1,63 @@
+name: tailscale
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: false # Kita matikan cache agar tidak ada konflik path lama
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Setup Android NDK
+        run: |
+          NDK_PATH=$(ls -d $ANDROID_SDK_ROOT/ndk/* | tail -1)
+          echo "NDK_PATH=$NDK_PATH" >> $GITHUB_ENV
+
+      - name: Install & Force Bind Source
+        run: |
+          # Install tools
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          go install golang.org/x/mobile/cmd/gobind@latest
+          
+          # Buat module dan download source secara eksplisit
+          rm -f go.mod go.sum
+          go mod init tailscale
+          go get golang.org/x/mobile/bind
+          go mod download
+          
+          # Tambahkan path binary ke environment
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+
+      - name: Build Fat AAR (ARM & ARM64)
+        run: |
+          export ANDROID_NDK_HOME=${{ env.NDK_PATH }}
+          
+          # Jalankan gomobile init
+          $(go env GOPATH)/bin/gomobile init
+          
+          # Gunakan perintah bind dengan path lengkap ke module
+          # Kita tambahkan flag -v untuk debugging
+          $(go env GOPATH)/bin/gomobile bind -target android/arm,android/arm64 -androidapi 21 -v -o tailscale.aar .
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tailscale
+          path: tailscale.aar

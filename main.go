@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
 	"net"
 	"net/http"
 	"os"
@@ -48,10 +47,11 @@ func StartEngine(storagePath string) {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/", handleGuard)
 		mux.HandleFunc("/login", handleLogin)
-		mux.HandleFunc("/logout", handleLogout)
+		mux.HandleFunc("/logout", handleLogout) // Sekarang sudah diperbaiki fungsinya
 		mux.HandleFunc("/add", handleAdd)
 		mux.HandleFunc("/stop", handleStop)
 
+		// Pakai localhost saja
 		http.ListenAndServe("127.0.0.1:8080", mux)
 	}()
 }
@@ -71,39 +71,38 @@ func renderLoginPage(w http.ResponseWriter) {
 func handleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" { return }
 	key := r.FormValue("authkey")
-	
-	// Simpan key untuk auto-login
 	ioutil.WriteFile(filepath.Join(dataDir, "last_key.txt"), []byte(key), 0644)
-	
 	tsServer.AuthKey = key
 	isLogin = true
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
-func handleLogout(w http.ResponseWriter) {
+// PERBAIKAN: Menambahkan parameter r *http.Request agar sesuai standar
+func handleLogout(w http.ResponseWriter, r *http.Request) {
 	mu.Lock()
 	for _, b := range bridges { b.Cancel() }
 	bridges = make(map[string]*BridgeMap)
 	mu.Unlock()
 
 	os.Remove(filepath.Join(dataDir, "last_key.txt"))
-	tsServer.Close()
+	if tsServer != nil {
+		tsServer.Close()
+	}
 	isLogin = false
-	// Re-init server for next login
 	tsServer = &tsnet.Server{Hostname: "dual-mode-bridge", Dir: dataDir, Ephemeral: true}
-	// Redirect will be handled by client
+	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
 func renderDashboard(w http.ResponseWriter) {
 	mu.Lock()
 	defer mu.Unlock()
-	fmt.Fprintf(w, `<html><head><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>:root{--bg:#0f172a;--card:#1e293b;--primary:#3b82f6;--text:#f8fafc;}body{background:var(--bg);color:var(--text);font-family:sans-serif;padding:10px;}.card{background:var(--card);padding:15px;border-radius:12px;margin-bottom:15px;}input,select,button{width:100%%;padding:12px;margin:5px 0;border-radius:8px;border:1px solid #334155;background:#0f172a;color:white;}.btn-submit{background:var(--primary);border:none;font-weight:bold;}.btn-logout{background:#64748b;font-size:0.8em; margin-top:10px; border:none;}table{width:100%%;font-size:0.8em;border-collapse:collapse;}td{padding:8px;border-top:1px solid #334155;}.status-on{color:#22c55e;} .btn-stop{background:#ef4444; border:none; padding:5px; font-size:0.7em; border-radius:4px;}</style></head><body>
+	fmt.Fprintf(w, `<html><head><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>:root{--bg:#0f172a;--card:#1e293b;--primary:#3b82f6;--text:#f8fafc;}body{background:var(--bg);color:var(--text);font-family:sans-serif;padding:10px;}.card{background:var(--card);padding:15px;border-radius:12px;margin-bottom:15px;}input,select,button{width:100%%;padding:12px;margin:5px 0;border-radius:8px;border:1px solid #334155;background:#0f172a;color:white;}.btn-submit{background:var(--primary);border:none;font-weight:bold;}.btn-logout{background:#64748b;font-size:0.8em; margin-top:10px; border:none; color:white; border-radius:8px; padding:10px;}table{width:100%%;font-size:0.8em;border-collapse:collapse;}td{padding:8px;border-top:1px solid #334155;}.status-on{color:#22c55e;} .btn-stop{background:#ef4444; border:none; padding:5px; font-size:0.7em; border-radius:4px; color:white;}</style></head><body>
 	<div class="card">
 		<h3>🛰️ Multi Tunnel Bridge</h3>
 		<form action="/add" method="POST">
 			<input type="text" name="tip" placeholder="Target IP Tailscale">
-			<input type="number" name="lp" placeholder="Local Port (Internal)">
-			<input type="number" name="tp" placeholder="Target Port (Remote)">
+			<input type="number" name="lp" placeholder="Local Port">
+			<input type="number" name="tp" placeholder="Target Port">
 			<select name="proto"><option value="tcp">TCP</option><option value="udp">UDP</option></select>
 			<button type="submit" class="btn-submit">ADD & CONNECT</button>
 		</form>
@@ -115,7 +114,7 @@ func renderDashboard(w http.ResponseWriter) {
 		fmt.Fprintf(w, "<tr><td><b class='status-on'>●</b> %s</td><td>%s:%s</td><td><a href='/stop?id=%s'><button class='btn-stop'>OFF</button></a></td></tr>", b.Protocol, b.LocalPort, b.TargetPort, id)
 	}
 	fmt.Fprintf(w, `</table>
-		<button onclick="window.location='/logout'" class="btn-logout">LOGOUT & CLEAR STATE</button>
+		<button onclick="window.location='/logout'" class="btn-logout">LOGOUT</button>
 	</div></body></html>`)
 }
 
